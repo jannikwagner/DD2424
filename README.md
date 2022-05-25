@@ -14,4 +14,4 @@ We apply Neural ODEs to epidemic time series data and compare the results to the
 
 First, we applied CNFs to artificial data generated from a two dimensional density based on an image of the flag of Sweden. The GIF shows the contiuous transformation over time of a normal distribution to the learned distribution, using a hypernetwork with depth 3, hpernet width 16, and width 64.
 
-![](CNF/cnf-viz-niter_1000_width64_hidden16cnf-viz-10000.gif)
+![](CNF/results/cnf-viz-niter_1000_width64_hidden16cnf-viz-10000.gif)
