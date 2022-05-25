@@ -20,18 +20,18 @@ parser.add_argument('--niters', type=int, default=1000)
 parser.add_argument('--lr', type=float, default=1e-3)
 parser.add_argument('--num_samples', type=int, default=512)
 parser.add_argument('--width', type=int, default=64)
-parser.add_argument('--hidden_dim', type=int, default=16)
+parser.add_argument('--hidden_dim', type=int, default=32)
 parser.add_argument('--yolo_dim', type=int, default=2)
 parser.add_argument('--gpu', type=int, default=0)
 parser.add_argument('--train_dir', type=str, default=None)
 parser.add_argument('--results_dir', type=str, default="results_test")
 parser.add_argument('--img', type=str, default="imgs/flag.png")
 parser.add_argument('--aug_dim', type=int, default=0)
-parser.add_argument('--de_augment', type=bool, default=False)
+parser.add_argument('--de_augment', type=bool, default=True)
 args = parser.parse_args()
 
 print("--niters: " + str(args.niters) + ' --width: '+ str(args.width) + " --hidden_dim: " + str(args.hidden_dim))
-
+print(args.adjoint)
 if args.adjoint:
     from torchdiffeq import odeint_adjoint as odeint
 else:
@@ -39,7 +39,7 @@ else:
 
 
 class CNF(nn.Module):
-    """ CNF using a hyper network
+    """ CNF using a hyper network of 3 layers
     """
     def __init__(self, in_out_dim, hidden_dim, width):
         super().__init__()
@@ -158,6 +158,62 @@ class TimeIncorporatingLayer(nn.Module):
 
         return t, z
 
+NONLINEARITIES = {
+    "tanh": nn.Tanh(),
+    "relu": nn.ReLU(),
+    "softplus": nn.Softplus(),
+    "elu": nn.ELU(),
+    "none": nn.Identity(),
+    None: nn.Identity(),
+}
+
+class TimeIncorporatingLayer2(nn.Module):
+    def __init__(self, in_dim, out_dim, activation_fn="tanh", batch_norm=False, time_act_fn="tanh"):
+        super().__init__()
+        activation_fn = NONLINEARITIES[activation_fn]
+        time_act_fn = NONLINEARITIES[time_act_fn]
+        self.fc = nn.Linear(in_dim, out_dim)
+        self.activation_fn = activation_fn
+        self.bn = nn.BatchNorm1d(out_dim) if batch_norm else nn.Identity()
+        self.squash = nn.Sequential(
+            nn.Linear(1, in_dim),
+            time_act_fn,
+            nn.Linear(in_dim, in_dim),
+            nn.Sigmoid()
+        )
+        self.add = nn.Sequential(
+            nn.Linear(1, in_dim),
+            time_act_fn,
+            nn.Linear(in_dim, in_dim)
+        )
+    
+    def forward(self, x):
+        t, z = x
+        t_tensor = torch.zeros((z.shape[0], 1)) + t
+        z = z * self.squash(t_tensor)
+        z = z + self.add(t_tensor)
+        
+        z = self.fc(z)
+        z = self.activation_fn(z)
+        z = self.bn(z)
+
+        return t, z
+
+class LinearBlock(nn.Module):
+    def __init__(self, in_dim, out_dim, activation_fn=F.tanh, batch_norm=False):
+        super().__init__()
+        self.fc = nn.Linear(in_dim, out_dim)
+        self.activation_fn = activation_fn
+        self.bn = nn.BatchNorm1d(out_dim) if batch_norm else nn.Identity()
+    
+    def forward(self, x):
+        t, z = x
+        z = self.fc(z)
+        z = self.activation_fn(z)
+        z = self.bn(z)
+
+        return t, z
+
 
 class CNF4(nn.Module):
     def __init__(self, in_out_dim):
@@ -193,7 +249,7 @@ class CNF4(nn.Module):
 
 class CNF5(nn.Module):
     """
-    CNF with time 4 incoporating layers
+    CNF with 4 time incoporating layers
     """
     def __init__(self, in_out_dim):
         super().__init__()
@@ -222,7 +278,7 @@ class CNF5(nn.Module):
 
 class CNF6(nn.Module):
     """
-    CNF with 4 time incoporating layers
+    CNF with time incoporating layers
     """
     def __init__(self, in_out_dim):
         super().__init__()
@@ -231,6 +287,123 @@ class CNF6(nn.Module):
                   TimeIncorporatingLayer(32, 64),
                   TimeIncorporatingLayer(64, 32),
                   TimeIncorporatingLayer(32, in_out_dim, activation_fn=nn.Identity(), batch_norm=False),
+        ]
+        self. seq = nn.Sequential(*layers)
+
+    def forward(self, t, states: List[torch.Tensor]):
+        z = states[0]
+        logp_z = states[1]
+
+        batchsize = z.shape[0]
+
+        with torch.set_grad_enabled(True):
+            z.requires_grad_(True)
+
+            _, dz_dt = self.seq((t, z))
+
+            dlogp_z_dt = -trace_df_dz(dz_dt, z).view(batchsize, 1)
+
+        return (dz_dt, dlogp_z_dt)
+
+class CNF7(nn.Module):
+    """
+    CNF with time incoporating layers
+    """
+    def __init__(self, in_out_dim):
+        super().__init__()
+        self.in_out_dim = in_out_dim
+        layers = [TimeIncorporatingLayer(in_out_dim, 64),
+                  TimeIncorporatingLayer(64, 128),
+                  TimeIncorporatingLayer(128, 128),
+                  TimeIncorporatingLayer(128, 64),
+                  TimeIncorporatingLayer(64, in_out_dim, activation_fn=nn.Identity(), batch_norm=False),
+        ]
+        self. seq = nn.Sequential(*layers)
+
+    def forward(self, t, states: List[torch.Tensor]):
+        z = states[0]
+        logp_z = states[1]
+
+        batchsize = z.shape[0]
+
+        with torch.set_grad_enabled(True):
+            z.requires_grad_(True)
+
+            _, dz_dt = self.seq((t, z))
+
+            dlogp_z_dt = -trace_df_dz(dz_dt, z).view(batchsize, 1)
+
+        return (dz_dt, dlogp_z_dt)
+
+class CNF8(nn.Module):
+    """
+    CNF with time incoporating layers
+    """
+    def __init__(self, in_out_dim):
+        super().__init__()
+        self.in_out_dim = in_out_dim
+        layers = [LinearBlock(in_out_dim, 64),
+                  LinearBlock(64, 128),
+                  LinearBlock(128, 128),
+                  LinearBlock(128, 64),
+                  LinearBlock(64, in_out_dim, activation_fn=nn.Identity(), batch_norm=False),
+        ]
+        self. seq = nn.Sequential(*layers)
+
+    def forward(self, t, states: List[torch.Tensor]):
+        z = states[0]
+        logp_z = states[1]
+
+        batchsize = z.shape[0]
+
+        with torch.set_grad_enabled(True):
+            z.requires_grad_(True)
+
+            _, dz_dt = self.seq((t, z))
+
+            dlogp_z_dt = -trace_df_dz(dz_dt, z).view(batchsize, 1)
+
+        return (dz_dt, dlogp_z_dt)
+
+class CNF9(nn.Module):
+    """
+    CNF with time incoporating layers
+    """
+    def __init__(self, in_out_dim):
+        super().__init__()
+        self.in_out_dim = in_out_dim
+        layers = [TimeIncorporatingLayer2(in_out_dim, 64),
+                  TimeIncorporatingLayer2(64, 128),
+                  TimeIncorporatingLayer2(128, 128),
+                  TimeIncorporatingLayer2(128, 64),
+                  TimeIncorporatingLayer2(64, in_out_dim, activation_fn=None, batch_norm=False),
+        ]
+        self. seq = nn.Sequential(*layers)
+
+    def forward(self, t, states: List[torch.Tensor]):
+        z = states[0]
+        logp_z = states[1]
+
+        batchsize = z.shape[0]
+
+        with torch.set_grad_enabled(True):
+            z.requires_grad_(True)
+
+            _, dz_dt = self.seq((t, z))
+
+            dlogp_z_dt = -trace_df_dz(dz_dt, z).view(batchsize, 1)
+
+        return (dz_dt, dlogp_z_dt)
+
+class CNF10(nn.Module):
+    """
+    CNF with time incoporating layers
+    """
+    def __init__(self, in_out_dim):
+        super().__init__()
+        self.in_out_dim = in_out_dim
+        layers = [TimeIncorporatingLayer2(in_out_dim, 64),
+                  TimeIncorporatingLayer2(64, in_out_dim, activation_fn=None, batch_norm=False),
         ]
         self. seq = nn.Sequential(*layers)
 
@@ -261,7 +434,7 @@ def trace_df_dz(f, z):
 
 
 class HyperNetwork(nn.Module):
-    """Hyper-network allowing f(z(t), t) to change with time.
+    """Hyper-network allowing f(z(t), t) to change with time. 3 layers
 
     Adapted from the NumPy implementation at:
     https://gist.github.com/rtqichen/91924063aa4cc95e7ef30b3a5491cc52
@@ -371,7 +544,6 @@ def get_batch_from_circles(num_samples):
     return(x, logp_diff_t1)
 
 img = np.array(Image.open(args.img).convert('L'))
-
 h, w = img.shape
 xx = np.linspace(-1.5, 1.5, w)
 yy = np.linspace(-1.5, 1.5, h)
@@ -396,6 +568,40 @@ def get_batch(num_samples):
     return(x, logp_diff_t1)
 
 
+class TolControl:
+    def __init__(self, niters, start_tol=0.1, end_tol=10**-5, steps=5, patience=5):
+        self.niters = niters
+        self.iter = 0
+        self.start_tol = start_tol
+        self.step = 0
+        self.end_tol = end_tol
+        self.steps = steps
+        self.patience = patience
+        self.patience_counter = 0
+        self.last_loss = np.inf
+    def get_tol(self):
+        ratio = self.end_tol / self.start_tol
+        return self.start_tol * ratio ** (self.step/(self.steps-1))
+    def update(self, loss):
+        self.iter += 1
+        if self.step < self.steps-1:
+            if loss >= self.last_loss:
+                self.patience_counter += 1
+                if self.patience_counter > self.patience:
+                    self.step += 1
+                    self.last_loss = loss
+                    self.patience_counter = 0
+                    print(f"tol decrease to {self.get_tol()} due to loss")
+            else:
+                self.last_loss = loss
+                self.patience_counter = 0
+            if self.iter // (self.niters // self.steps) > self.step:
+                self.step = self.iter // (self.niters // self.steps)
+                print(f"tol decrease to {self.get_tol()} due to time")
+            # print(self.patience_counter, self.last_loss, loss)
+        return self.get_tol()
+
+
 if __name__ == '__main__':
     t0 = 0
     t1 = 10
@@ -403,13 +609,14 @@ if __name__ == '__main__':
                           if torch.cuda.is_available() else 'cpu')
 
     # model
-    func = CNF(in_out_dim = 2 + args.aug_dim, hidden_dim=args.hidden_dim, width=args.width).to(device)
-    # func = CNF5(in_out_dim=2 + args.aug_dim).to(device)
+    # func = CNF(in_out_dim=2 + args.aug_dim, hidden_dim=args.hidden_dim, width=args.width).to(device)
+    func = CNF10(in_out_dim=2 + args.aug_dim).to(device)
+    print(func)
     optimizer = optim.Adam(func.parameters(), lr=args.lr)
     if args.de_augment:
         p_z0 = torch.distributions.MultivariateNormal(
-            loc=torch.tensor([0.0, 0.0]).to(device),
-            covariance_matrix=torch.tensor([[0.1, 0.0], [0.0, 0.1]]).to(device)
+            loc=torch.tensor(torch.zeros(2)).to(device),
+            covariance_matrix=torch.eye(2).to(device)
         )
     else:
         p_z0 = torch.distributions.MultivariateNormal(
@@ -430,7 +637,7 @@ if __name__ == '__main__':
     # tol = tol_control.get_tol()
     tol = 10**-5
     try:
-        filename = '../loss_results/loss_niter_' + str(args.niters) + '_augdim_' + str(args.aug_dim) + "_width" + str(args.width) + "_hidden" + str(args.hidden_dim)
+        filename = '../loss_time_incoperating/loss__cnf5_niter_' + str(args.niters) + '_augdim_' + str(args.aug_dim)
         f = open(filename, 'w', newline='', encoding='utf-8')
         writer = csv.writer(f)
         writer.writerow(['iteration', 'running avg loss'])
@@ -462,6 +669,7 @@ if __name__ == '__main__':
             optimizer.step()
 
             loss_meter.update(loss.item())
+            # tol = tol_control.update(loss.item())
 
             print('Iter: {}, running avg loss: {:.4f}'.format(itr, loss_meter.avg))
             writer.writerow([itr, loss_meter.avg])
@@ -493,8 +701,6 @@ if __name__ == '__main__':
             logp_diff_t0 = torch.zeros(viz_samples, 1).type(torch.float32).to(device)
 
             z_t0_aug = torch.cat([z_t0, torch.zeros([z_t0.shape[0], args.aug_dim])], 1)
-            # z_t0_aug = torch.cat([z_t0, torch.normal(0, 1, [z_t0.shape[0], args.aug_dim]) ], 1)
-
             z_t_samples, _ = odeint(
                 func,
                 (z_t0_aug, logp_diff_t0),
@@ -512,12 +718,9 @@ if __name__ == '__main__':
             points = np.vstack(np.meshgrid(x, y)).reshape([2, -1]).T
 
             z_t1 = torch.tensor(points).type(torch.float32).to(device)
-            logp_diff_t1 = torch.zeros(z_t1.shape[0], 1).type(torch.float32).to(device)            
-            # logp_diff_t1 = torch.normal(0, 1, [z_t1.shape[0], 1]).type(torch.float32).to(device)
+            logp_diff_t1 = torch.zeros(z_t1.shape[0], 1).type(torch.float32).to(device)
             
             z_t1_aug = torch.cat([z_t1, torch.zeros([z_t1.shape[0], args.aug_dim])], 1)
-            # z_t1_aug = torch.cat([z_t1, torch.normal(0, 1, [z_t1.shape[0], args.aug_dim])], 1)
-
             z_t_density, logp_diff_t = odeint(
                 func,
                 (z_t1_aug, logp_diff_t1),
