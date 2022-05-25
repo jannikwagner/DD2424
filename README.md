@@ -18,4 +18,7 @@ First, we applied Continuous Normalizing Flows (CNFs) to artificial data generat
 
 We then experimented with high dimensional real world data and used the MNIST data set as samples from a 784 dimensional distribution. Generated images of our own implementation and more complex CNF trained on MNIST are shown below:
 
-![](CNF/results/mnist.png)
+<center>
+    <img src="CNF/results/mnist.png">
+</center>
+
