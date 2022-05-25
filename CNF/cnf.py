@@ -159,7 +159,7 @@ class TimeIncorporatingLayer(nn.Module):
         return t, z
 
 
-class CNF4(nn.Module):
+class CNF_2layer(nn.Module):
     def __init__(self, in_out_dim):
         super().__init__()
         self.in_out_dim = in_out_dim
@@ -191,7 +191,7 @@ class CNF4(nn.Module):
 
         return (dz_dt, dlogp_z_dt)
 
-class CNF5(nn.Module):
+class CNF_time_incorp_4layers_narrow(nn.Module):
     """
     CNF with time 4 incoporating layers
     """
@@ -220,7 +220,7 @@ class CNF5(nn.Module):
 
         return (dz_dt, dlogp_z_dt)
 
-class CNF6(nn.Module):
+class CNF_time_incorp_4layers(nn.Module):
     """
     CNF with 4 time incoporating layers
     """
@@ -229,6 +229,37 @@ class CNF6(nn.Module):
         self.in_out_dim = in_out_dim
         layers = [TimeIncorporatingLayer(in_out_dim, 32),
                   TimeIncorporatingLayer(32, 64),
+                  TimeIncorporatingLayer(64, 32),
+                  TimeIncorporatingLayer(32, in_out_dim, activation_fn=nn.Identity(), batch_norm=False),
+        ]
+        self. seq = nn.Sequential(*layers)
+
+    def forward(self, t, states: List[torch.Tensor]):
+        z = states[0]
+        logp_z = states[1]
+
+        batchsize = z.shape[0]
+
+        with torch.set_grad_enabled(True):
+            z.requires_grad_(True)
+
+            _, dz_dt = self.seq((t, z))
+
+            dlogp_z_dt = -trace_df_dz(dz_dt, z).view(batchsize, 1)
+
+        return (dz_dt, dlogp_z_dt)
+
+class CNF_time_incorp_6layers(nn.Module):
+    """
+    CNF with 6 time incoporating layers. Hidden dimensions: 32, 64, 64, 64, 32
+    """
+    def __init__(self, in_out_dim):
+        super().__init__()
+        self.in_out_dim = in_out_dim
+        layers = [TimeIncorporatingLayer(in_out_dim, 32),
+                  TimeIncorporatingLayer(32, 64),
+                  TimeIncorporatingLayer(64, 64),
+                  TimeIncorporatingLayer(64, 64),
                   TimeIncorporatingLayer(64, 32),
                   TimeIncorporatingLayer(32, in_out_dim, activation_fn=nn.Identity(), batch_norm=False),
         ]
@@ -404,7 +435,7 @@ if __name__ == '__main__':
 
     # model
     func = CNF(in_out_dim = 2 + args.aug_dim, hidden_dim=args.hidden_dim, width=args.width).to(device)
-    # func = CNF5(in_out_dim=2 + args.aug_dim).to(device)
+    # func = CNF_time_incorp_6layers(in_out_dim=2 + args.aug_dim).to(device)
     optimizer = optim.Adam(func.parameters(), lr=args.lr)
     if args.de_augment:
         p_z0 = torch.distributions.MultivariateNormal(
