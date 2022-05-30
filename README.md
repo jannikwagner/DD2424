@@ -22,3 +22,6 @@ We then experimented with high dimensional real world data and used the MNIST da
     <img src="CNF/results/mnist.png">
 </center>
 
+## References
+
+Parts of the code are inspired by code from [torchdiffeq](https://github.com/rtqichen/torchdiffeq) and [FFJORD](https://github.com/rtqichen/ffjord).

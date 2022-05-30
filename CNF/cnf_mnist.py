@@ -1,3 +1,8 @@
+"""
+Code for experimentation with CNFs on MNIST.
+Inspired by https://github.com/rtqichen/ffjord
+"""
+
 from matplotlib import pyplot as plt
 import torch.nn as nn
 import torch

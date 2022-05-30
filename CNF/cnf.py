@@ -1,3 +1,8 @@
+"""
+Experimentation with artificial 2d density
+Code inspired by https://github.com/rtqichen/torchdiffeq
+"""
+
 import os
 import argparse
 import glob
